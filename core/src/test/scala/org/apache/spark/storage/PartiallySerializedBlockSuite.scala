@@ -24,7 +24,6 @@ import scala.reflect.ClassTag
 import org.mockito.Mockito
 import org.mockito.Mockito.atLeastOnce
 import org.mockito.invocation.InvocationOnMock
-import org.mockito.stubbing.Answer
 import org.scalatest.{BeforeAndAfterEach, PrivateMethodTester}
 
 import org.apache.spark.{SparkConf, SparkFunSuite, TaskContext, TaskContextImpl}
@@ -59,15 +58,14 @@ class PartiallySerializedBlockSuite
 
     val bbos: ChunkedByteBufferOutputStream = {
       val spy = Mockito.spy(new ChunkedByteBufferOutputStream(128, ByteBuffer.allocate))
-      Mockito.doAnswer(new Answer[ChunkedByteBuffer] {
-        override def answer(invocationOnMock: InvocationOnMock): ChunkedByteBuffer = {
-          Mockito.spy(invocationOnMock.callRealMethod().asInstanceOf[ChunkedByteBuffer])
-        }
-      }).when(spy).toChunkedByteBuffer
+      Mockito.doAnswer { (invocationOnMock: InvocationOnMock) =>
+        Mockito.spy(invocationOnMock.callRealMethod().asInstanceOf[ChunkedByteBuffer])
+      }.when(spy).toChunkedByteBuffer
       spy
     }
 
-    val serializer = serializerManager.getSerializer(implicitly[ClassTag[T]]).newInstance()
+    val serializer = serializerManager
+      .getSerializer(implicitly[ClassTag[T]], autoPick = true).newInstance()
     val redirectableOutputStream = Mockito.spy(new RedirectableOutputStream)
     redirectableOutputStream.setOutputStream(bbos)
     val serializationStream = Mockito.spy(serializer.serializeStream(redirectableOutputStream))
@@ -144,7 +142,7 @@ class PartiallySerializedBlockSuite
     try {
       TaskContext.setTaskContext(TaskContext.empty())
       val partiallySerializedBlock = partiallyUnroll((1 to 10).iterator, 2)
-      TaskContext.get().asInstanceOf[TaskContextImpl].markTaskCompleted()
+      TaskContext.get().asInstanceOf[TaskContextImpl].markTaskCompleted(None)
       Mockito.verify(partiallySerializedBlock.getUnrolledChunkedByteBuffer).dispose()
       Mockito.verifyNoMoreInteractions(memoryStore)
     } finally {
@@ -182,7 +180,8 @@ class PartiallySerializedBlockSuite
       Mockito.verifyNoMoreInteractions(memoryStore)
       Mockito.verify(partiallySerializedBlock.getUnrolledChunkedByteBuffer, atLeastOnce).dispose()
 
-      val serializer = serializerManager.getSerializer(implicitly[ClassTag[T]]).newInstance()
+      val serializer = serializerManager
+        .getSerializer(implicitly[ClassTag[T]], autoPick = true).newInstance()
       val deserialized =
         serializer.deserializeStream(new ByteBufferInputStream(bbos.toByteBuffer)).asIterator.toSeq
       assert(deserialized === items)

@@ -18,12 +18,12 @@
 package org.apache.spark.deploy.worker
 
 import java.io._
+import java.net.URI
 import java.nio.charset.StandardCharsets
 
 import scala.collection.JavaConverters._
 
 import com.google.common.io.Files
-import org.apache.hadoop.fs.Path
 
 import org.apache.spark.{SecurityManager, SparkConf}
 import org.apache.spark.deploy.{DriverDescription, SparkHadoopUtil}
@@ -31,6 +31,7 @@ import org.apache.spark.deploy.DeployMessages.DriverStateChanged
 import org.apache.spark.deploy.master.DriverState
 import org.apache.spark.deploy.master.DriverState.DriverState
 import org.apache.spark.internal.Logging
+import org.apache.spark.internal.config.Worker.WORKER_DRIVER_TERMINATE_TIMEOUT
 import org.apache.spark.rpc.RpcEndpointRef
 import org.apache.spark.util.{Clock, ShutdownHookManager, SystemClock, Utils}
 
@@ -57,7 +58,7 @@ private[deploy] class DriverRunner(
   @volatile private[worker] var finalException: Option[Exception] = None
 
   // Timeout to wait for when trying to terminate a driver.
-  private val DRIVER_TERMINATE_TIMEOUT_MS = 10 * 1000
+  private val driverTerminateTimeoutMs = conf.get(WORKER_DRIVER_TERMINATE_TIMEOUT)
 
   // Decoupled for testing
   def setClock(_clock: Clock): Unit = {
@@ -121,7 +122,7 @@ private[deploy] class DriverRunner(
     killed = true
     synchronized {
       process.foreach { p =>
-        val exitCode = Utils.terminateProcess(p, DRIVER_TERMINATE_TIMEOUT_MS)
+        val exitCode = Utils.terminateProcess(p, driverTerminateTimeoutMs)
         if (exitCode.isEmpty) {
           logWarning("Failed to terminate driver process: " + p +
               ". This process will likely be orphaned.")
@@ -147,30 +148,24 @@ private[deploy] class DriverRunner(
    * Will throw an exception if there are errors downloading the jar.
    */
   private def downloadUserJar(driverDir: File): String = {
-    val jarPath = new Path(driverDesc.jarUrl)
-    val hadoopConf = SparkHadoopUtil.get.newConfiguration(conf)
-    val destPath = new File(driverDir.getAbsolutePath, jarPath.getName)
-    val jarFileName = jarPath.getName
+    val jarFileName = new URI(driverDesc.jarUrl).getPath.split("/").last
     val localJarFile = new File(driverDir, jarFileName)
-    val localJarFilename = localJarFile.getAbsolutePath
-
     if (!localJarFile.exists()) { // May already exist if running multiple workers on one node
-      logInfo(s"Copying user jar $jarPath to $destPath")
+      logInfo(s"Copying user jar ${driverDesc.jarUrl} to $localJarFile")
       Utils.fetchFile(
         driverDesc.jarUrl,
         driverDir,
         conf,
         securityManager,
-        hadoopConf,
+        SparkHadoopUtil.get.newConfiguration(conf),
         System.currentTimeMillis(),
         useCache = false)
+      if (!localJarFile.exists()) { // Verify copy succeeded
+        throw new IOException(
+          s"Can not find expected jar $jarFileName which should have been loaded in $driverDir")
+      }
     }
-
-    if (!localJarFile.exists()) { // Verify copy succeeded
-      throw new Exception(s"Did not see expected jar $jarFileName in $driverDir")
-    }
-
-    localJarFilename
+    localJarFile.getAbsolutePath
   }
 
   private[worker] def prepareAndRunDriver(): Int = {
@@ -198,8 +193,9 @@ private[deploy] class DriverRunner(
       CommandUtils.redirectStream(process.getInputStream, stdout)
 
       val stderr = new File(baseDir, "stderr")
-      val formattedCommand = builder.command.asScala.mkString("\"", "\" \"", "\"")
-      val header = "Launch Command: %s\n%s\n\n".format(formattedCommand, "=" * 40)
+      val redactedCommand = Utils.redactCommandLineArgs(conf, builder.command.asScala)
+        .mkString("\"", "\" \"", "\"")
+      val header = "Launch Command: %s\n%s\n\n".format(redactedCommand, "=" * 40)
       Files.append(header, stderr, StandardCharsets.UTF_8)
       CommandUtils.redirectStream(process.getErrorStream, stderr)
     }
@@ -215,8 +211,10 @@ private[deploy] class DriverRunner(
     val successfulRunDuration = 5
     var keepTrying = !killed
 
+    val redactedCommand = Utils.redactCommandLineArgs(conf, command.command)
+      .mkString("\"", "\" \"", "\"")
     while (keepTrying) {
-      logInfo("Launch Command: " + command.command.mkString("\"", "\" \"", "\""))
+      logInfo("Launch Command: " + redactedCommand)
 
       synchronized {
         if (killed) { return exitCode }
@@ -230,7 +228,7 @@ private[deploy] class DriverRunner(
       // check if attempting another run
       keepTrying = supervise && exitCode != 0 && !killed
       if (keepTrying) {
-        if (clock.getTimeMillis() - processStart > successfulRunDuration * 1000) {
+        if (clock.getTimeMillis() - processStart > successfulRunDuration * 1000L) {
           waitSeconds = 1
         }
         logInfo(s"Command exited with status $exitCode, re-launching after $waitSeconds s.")

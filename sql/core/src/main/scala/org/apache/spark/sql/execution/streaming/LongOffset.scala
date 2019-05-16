@@ -22,8 +22,17 @@ package org.apache.spark.sql.execution.streaming
  */
 case class LongOffset(offset: Long) extends Offset {
 
+  override val json = offset.toString
+
   def +(increment: Long): LongOffset = new LongOffset(offset + increment)
   def -(decrement: Long): LongOffset = new LongOffset(offset - decrement)
+}
 
-  override def toString: String = s"#$offset"
+object LongOffset {
+
+  /**
+   * LongOffset factory from serialized offset.
+   * @return new LongOffset
+   */
+  def apply(offset: SerializedOffset) : LongOffset = new LongOffset(offset.json.toLong)
 }

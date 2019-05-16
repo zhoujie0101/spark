@@ -72,7 +72,10 @@ def _convert_to_vector(l):
         return DenseVector(l)
     elif _have_scipy and scipy.sparse.issparse(l):
         assert l.shape[1] == 1, "Expected column vector"
+        # Make sure the converted csc_matrix has sorted indices.
         csc = l.tocsc()
+        if not csc.has_sorted_indices:
+            csc.sort_indices()
         return SparseVector(l.shape[0], csc.indices, csc.data)
     else:
         raise TypeError("Cannot convert type %s into Vector" % type(l))
@@ -267,6 +270,8 @@ class DenseVector(Vector):
     DenseVector([3.0, 2.0])
     >>> u % 2
     DenseVector([1.0, 0.0])
+    >>> -v
+    DenseVector([-1.0, -2.0])
     """
     def __init__(self, ar):
         if isinstance(ar, bytes):
@@ -433,6 +438,9 @@ class DenseVector(Vector):
     def __getattr__(self, item):
         return getattr(self.array, item)
 
+    def __neg__(self):
+        return DenseVector(-self.array)
+
     def _delegate(op):
         def func(self, other):
             if isinstance(other, DenseVector):
@@ -440,7 +448,6 @@ class DenseVector(Vector):
             return DenseVector(getattr(self.array, op)(other))
         return func
 
-    __neg__ = _delegate("__neg__")
     __add__ = _delegate("__add__")
     __sub__ = _delegate("__sub__")
     __mul__ = _delegate("__mul__")
@@ -481,7 +488,7 @@ class SparseVector(Vector):
         >>> SparseVector(4, {1:1.0, 6:2.0})
         Traceback (most recent call last):
         ...
-        AssertionError: Index 6 is out of the the size of vector with size=4
+        AssertionError: Index 6 is out of the size of vector with size=4
         >>> SparseVector(4, {-1:1.0})
         Traceback (most recent call last):
         ...
@@ -521,7 +528,7 @@ class SparseVector(Vector):
 
         if self.indices.size > 0:
             assert np.max(self.indices) < self.size, \
-                "Index %d is out of the the size of vector with size=%d" \
+                "Index %d is out of the size of vector with size=%d" \
                 % (np.max(self.indices), self.size)
             assert np.min(self.indices) >= 0, \
                 "Contains negative index %d" % (np.min(self.indices))
@@ -746,11 +753,12 @@ class SparseVector(Vector):
 class Vectors(object):
 
     """
-    Factory methods for working with vectors. Note that dense vectors
-    are simply represented as NumPy array objects, so there is no need
-    to covert them for use in MLlib. For sparse vectors, the factory
-    methods in this class create an MLlib-compatible type, or users
-    can pass in SciPy's C{scipy.sparse} column vectors.
+    Factory methods for working with vectors.
+
+    .. note:: Dense vectors are simply represented as NumPy array objects,
+        so there is no need to covert them for use in MLlib. For sparse vectors,
+        the factory methods in this class create an MLlib-compatible type, or users
+        can pass in SciPy's C{scipy.sparse} column vectors.
     """
 
     @staticmethod
@@ -972,14 +980,14 @@ class DenseMatrix(Matrix):
             return self.values[i + j * self.numRows]
 
     def __eq__(self, other):
-        if (not isinstance(other, DenseMatrix) or
-                self.numRows != other.numRows or
-                self.numCols != other.numCols):
+        if (self.numRows != other.numRows or self.numCols != other.numCols):
             return False
+        if isinstance(other, SparseMatrix):
+            return np.all(self.toArray() == other.toArray())
 
         self_values = np.ravel(self.toArray(), order='F')
         other_values = np.ravel(other.toArray(), order='F')
-        return all(self_values == other_values)
+        return np.all(self_values == other_values)
 
 
 class SparseMatrix(Matrix):
@@ -1152,9 +1160,14 @@ class Matrices(object):
 
 def _test():
     import doctest
+    try:
+        # Numpy 1.14+ changed it's string format.
+        np.set_printoptions(legacy='1.13')
+    except TypeError:
+        pass
     (failure_count, test_count) = doctest.testmod(optionflags=doctest.ELLIPSIS)
     if failure_count:
-        exit(-1)
+        sys.exit(-1)
 
 if __name__ == "__main__":
     _test()

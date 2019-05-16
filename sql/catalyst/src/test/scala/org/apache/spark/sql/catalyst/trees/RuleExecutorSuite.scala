@@ -56,4 +56,45 @@ class RuleExecutorSuite extends SparkFunSuite {
     }.getMessage
     assert(message.contains("Max iterations (10) reached for batch fixedPoint"))
   }
+
+  test("structural integrity checker - verify initial input") {
+    object WithSIChecker extends RuleExecutor[Expression] {
+      override protected def isPlanIntegral(expr: Expression): Boolean = expr match {
+        case IntegerLiteral(_) => true
+        case _ => false
+      }
+      val batches = Batch("once", Once, DecrementLiterals) :: Nil
+    }
+
+    assert(WithSIChecker.execute(Literal(10)) === Literal(9))
+
+    val message = intercept[TreeNodeException[LogicalPlan]] {
+      // The input is already invalid as determined by WithSIChecker.isPlanIntegral
+      WithSIChecker.execute(Literal(10.1))
+    }.getMessage
+    assert(message.contains("The structural integrity of the input plan is broken"))
+  }
+
+  test("structural integrity checker - verify rule execution result") {
+    object WithSICheckerForPositiveLiteral extends RuleExecutor[Expression] {
+      override protected def isPlanIntegral(expr: Expression): Boolean = expr match {
+        case IntegerLiteral(i) if i > 0 => true
+        case _ => false
+      }
+      val batches = Batch("once", Once, DecrementLiterals) :: Nil
+    }
+
+    assert(WithSICheckerForPositiveLiteral.execute(Literal(2)) === Literal(1))
+
+    val message = intercept[TreeNodeException[LogicalPlan]] {
+      WithSICheckerForPositiveLiteral.execute(Literal(1))
+    }.getMessage
+    assert(message.contains("the structural integrity of the plan is broken"))
+  }
+
+  test("SPARK-27243: dumpTimeSpent when no rule has run") {
+    RuleExecutor.resetMetrics()
+    // This should not throw an exception
+    RuleExecutor.dumpTimeSpent()
+  }
 }

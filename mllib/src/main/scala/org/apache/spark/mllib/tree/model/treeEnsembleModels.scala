@@ -66,14 +66,10 @@ class RandomForestModel @Since("1.2.0") (
     TreeEnsembleModel.SaveLoadV1_0.save(sc, path, this,
       RandomForestModel.SaveLoadV1_0.thisClassName)
   }
-
-  override protected def formatVersion: String = RandomForestModel.formatVersion
 }
 
 @Since("1.3.0")
 object RandomForestModel extends Loader[RandomForestModel] {
-
-  private[mllib] def formatVersion: String = TreeEnsembleModel.SaveLoadV1_0.thisFormatVersion
 
   /**
    *
@@ -170,8 +166,6 @@ class GradientBoostedTreesModel @Since("1.2.0") (
     broadcastTrees.destroy()
     evaluation.toArray
   }
-
-  override protected def formatVersion: String = GradientBoostedTreesModel.formatVersion
 }
 
 /**
@@ -187,7 +181,7 @@ object GradientBoostedTreesModel extends Loader[GradientBoostedTreesModel] {
    * @param initTreeWeight: learning rate assigned to the first tree.
    * @param initTree: first DecisionTreeModel.
    * @param loss: evaluation metric.
-   * @return a RDD with each element being a zip of the prediction and error
+   * @return an RDD with each element being a zip of the prediction and error
    *         corresponding to every sample.
    */
   @Since("1.4.0")
@@ -213,7 +207,7 @@ object GradientBoostedTreesModel extends Loader[GradientBoostedTreesModel] {
    * @param treeWeight: Learning rate.
    * @param tree: Tree using which the prediction and error should be updated.
    * @param loss: evaluation metric.
-   * @return a RDD with each element being a zip of the prediction and error
+   * @return an RDD with each element being a zip of the prediction and error
    *         corresponding to each sample.
    */
   @Since("1.4.0")
@@ -234,8 +228,6 @@ object GradientBoostedTreesModel extends Loader[GradientBoostedTreesModel] {
     }
     newPredError
   }
-
-  private[mllib] def formatVersion: String = TreeEnsembleModel.SaveLoadV1_0.thisFormatVersion
 
   /**
    * @param sc  Spark context used for loading model files.
@@ -341,7 +333,7 @@ private[tree] sealed class TreeEnsembleModel(
   def predict(features: RDD[Vector]): RDD[Double] = features.map(x => predict(x))
 
   /**
-   * Java-friendly version of [[org.apache.spark.mllib.tree.model.TreeEnsembleModel#predict]].
+   * Java-friendly version of `org.apache.spark.mllib.tree.model.TreeEnsembleModel.predict`.
    */
   def predict(features: JavaRDD[Vector]): JavaRDD[java.lang.Double] = {
     predict(features.rdd).toJavaRDD().asInstanceOf[JavaRDD[java.lang.Double]]

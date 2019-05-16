@@ -23,7 +23,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
-import org.apache.commons.logging.LogFactory
 import org.apache.hadoop.hive.conf.HiveConf
 import org.apache.hadoop.hive.conf.HiveConf.ConfVars
 import org.apache.hive.service.cli.thrift.{ThriftBinaryCLIService, ThriftHttpCLIService}
@@ -32,6 +31,7 @@ import org.apache.hive.service.server.HiveServer2
 import org.apache.spark.SparkContext
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.internal.Logging
+import org.apache.spark.internal.config.UI.UI_ENABLED
 import org.apache.spark.scheduler.{SparkListener, SparkListenerApplicationEnd, SparkListenerJobStart}
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.hive.HiveUtils
@@ -45,8 +45,7 @@ import org.apache.spark.util.{ShutdownHookManager, Utils}
  * `HiveThriftServer2` thrift server.
  */
 object HiveThriftServer2 extends Logging {
-  var LOG = LogFactory.getLog(classOf[HiveServer2])
-  var uiTab: Option[ThriftServerTab] = _
+  var uiTab: Option[ThriftServerTab] = None
   var listener: HiveThriftServer2Listener = _
 
   /**
@@ -65,7 +64,7 @@ object HiveThriftServer2 extends Logging {
     server.start()
     listener = new HiveThriftServer2Listener(server, sqlContext.conf)
     sqlContext.sparkContext.addSparkListener(listener)
-    uiTab = if (sqlContext.sparkContext.getConf.getBoolean("spark.ui.enabled", true)) {
+    uiTab = if (sqlContext.sparkContext.getConf.get(UI_ENABLED)) {
       Some(new ThriftServerTab(sqlContext.sparkContext))
     } else {
       None
@@ -73,6 +72,13 @@ object HiveThriftServer2 extends Logging {
   }
 
   def main(args: Array[String]) {
+    // If the arguments contains "-h" or "--help", print out the usage and exit.
+    if (args.contains("-h") || args.contains("--help")) {
+      HiveServer2.main(args)
+      // The following code should not be reachable. It is added to ensure the main function exits.
+      return
+    }
+
     Utils.initDaemon(log)
     val optionsProcessor = new HiveServer2.ServerOptionsProcessor("HiveThriftServer2")
     optionsProcessor.parse(args)
@@ -96,7 +102,7 @@ object HiveThriftServer2 extends Logging {
       logInfo("HiveThriftServer2 started")
       listener = new HiveThriftServer2Listener(server, SparkSQLEnv.sqlContext.conf)
       SparkSQLEnv.sparkContext.addSparkListener(listener)
-      uiTab = if (SparkSQLEnv.sparkContext.getConf.getBoolean("spark.ui.enabled", true)) {
+      uiTab = if (SparkSQLEnv.sparkContext.getConf.get(UI_ENABLED)) {
         Some(new ThriftServerTab(SparkSQLEnv.sparkContext))
       } else {
         None
@@ -294,7 +300,7 @@ private[hive] class HiveThriftServer2(sqlContext: SQLContext)
 
   private def isHTTPTransportMode(hiveConf: HiveConf): Boolean = {
     val transportMode = hiveConf.getVar(ConfVars.HIVE_SERVER2_TRANSPORT_MODE)
-    transportMode.toLowerCase(Locale.ENGLISH).equals("http")
+    transportMode.toLowerCase(Locale.ROOT).equals("http")
   }
 
 

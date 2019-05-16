@@ -19,8 +19,6 @@ package org.apache.spark.scheduler
 
 import java.util.Properties
 
-import scala.language.existentials
-
 import org.apache.spark._
 import org.apache.spark.rdd.RDD
 import org.apache.spark.util.{AccumulatorV2, CallSite}
@@ -53,9 +51,15 @@ private[scheduler] case class MapStageSubmitted(
   properties: Properties = null)
   extends DAGSchedulerEvent
 
-private[scheduler] case class StageCancelled(stageId: Int) extends DAGSchedulerEvent
+private[scheduler] case class StageCancelled(
+    stageId: Int,
+    reason: Option[String])
+  extends DAGSchedulerEvent
 
-private[scheduler] case class JobCancelled(jobId: Int) extends DAGSchedulerEvent
+private[scheduler] case class JobCancelled(
+    jobId: Int,
+    reason: Option[String])
+  extends DAGSchedulerEvent
 
 private[scheduler] case class JobGroupCancelled(groupId: String) extends DAGSchedulerEvent
 
@@ -80,8 +84,15 @@ private[scheduler] case class ExecutorAdded(execId: String, host: String) extend
 private[scheduler] case class ExecutorLost(execId: String, reason: ExecutorLossReason)
   extends DAGSchedulerEvent
 
+private[scheduler] case class WorkerRemoved(workerId: String, host: String, message: String)
+  extends DAGSchedulerEvent
+
 private[scheduler]
 case class TaskSetFailed(taskSet: TaskSet, reason: String, exception: Option[Throwable])
   extends DAGSchedulerEvent
 
 private[scheduler] case object ResubmitFailedStages extends DAGSchedulerEvent
+
+private[scheduler]
+case class SpeculativeTaskSubmitted(task: Task[_]) extends DAGSchedulerEvent
+
